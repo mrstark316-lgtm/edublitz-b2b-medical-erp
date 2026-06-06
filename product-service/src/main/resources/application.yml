@@ -8,7 +8,7 @@ spring:
     name: product-service
   data:
     mongodb:
-      uri: ${MONGODB_URI:mongodb+srv://demo:redhat@edublitz.laegfsa.mongodb.net/products_db?appName=edublitz}
+      uri: ${MONGODB_URI:mongodb+srv://demo:redhat123@medpharm-cluster.j1ztlv8.mongodb.net/products_db?appName=medpharm-cluster}
       database: products_db
   jackson:
     default-property-inclusion: non_null
