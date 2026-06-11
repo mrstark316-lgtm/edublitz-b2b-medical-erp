@@ -1,9 +1,12 @@
+// Backend — build, test; on main: Docker Hub/ECR login, push to ECR, deploy to EKS.
+//
+// In Jenkins: Manage Credentials → add these IDs exactly:
+//   aws-credentials   — AWS Credentials (ECR, STS)
+//   docker-registry     — Username + password (docker login before build; use Docker Hub token or your registry user)
+//   kubeconfig          — Secret file (kubectl context for the cluster)
+
 pipeline {
     agent any
-
-    tools {
-        jdk 'JDK17'
-    }
 
     environment {
         AWS_REGION    = 'us-east-1'
@@ -14,166 +17,62 @@ pipeline {
     options {
         timeout(time: 45, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '20'))
-        timestamps()
     }
 
     stages {
-
         stage('Checkout') {
-            steps {
-                checkout scm
-            }
+            steps { checkout scm }
         }
 
-        stage('Verify Environment') {
-            steps {
-                sh '''
-                    echo "===== USER ====="
-                    whoami
-
-                    echo "===== JAVA ====="
-                    echo "JAVA_HOME=$JAVA_HOME"
-                    java -version
-                    javac -version
-
-                    echo "===== MAVEN ====="
-                    mvn -version
-
-                    echo "===== DOCKER ====="
-                    docker --version
-
-                    echo "===== AWS ====="
-                    aws --version
-                '''
-            }
-        }
-
-        stage('Build & Test') {
+        stage('Build & test') {
             steps {
                 sh '''
                     set -e
-
-                    for svc in user-service product-service order-service
-                    do
-                        echo "================================"
-                        echo "Building $svc"
-                        echo "================================"
-
-                        cd $svc
-
-                        mvn clean verify -B
-
-                        cd ..
+                    for svc in user-service product-service order-service; do
+                      echo "=== $svc ==="
+                      (cd "$svc" && mvn -B clean verify)
                     done
                 '''
             }
-        }
-
-        stage('Publish Reports') {
-            steps {
-                junit allowEmptyResults: true,
-                      testResults: '**/target/surefire-reports/*.xml'
-            }
-        }
-
-        stage('Docker Build & Push') {
-            when {
-                branch 'main'
-            }
-
-            steps {
-
-                withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'],
-
-                    usernamePassword(
-                        credentialsId: 'docker-registry',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )
-                ]) {
-
-                    sh '''
-                        set -e
-
-                        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-
-                        ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
-                        echo "$DOCKER_PASS" | docker login \
-                          -u "$DOCKER_USER" \
-                          --password-stdin
-
-                        aws ecr get-login-password \
-                          --region $AWS_REGION | \
-                          docker login \
-                          --username AWS \
-                          --password-stdin $ECR_REGISTRY
-
-                        for svc in user-service product-service order-service
-                        do
-
-                            IMAGE="$ECR_REGISTRY/med-erp/$svc"
-
-                            echo "Building $IMAGE:$IMAGE_TAG"
-
-                            docker build \
-                              -t $IMAGE:$IMAGE_TAG \
-                              -t $IMAGE:latest \
-                              ./$svc
-
-                            docker push $IMAGE:$IMAGE_TAG
-                            docker push $IMAGE:latest
-
-                        done
-                    '''
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
                 }
             }
         }
 
-        stage('Deploy to EKS') {
-            when {
-                branch 'main'
-            }
-
+        stage('Docker push & deploy') {
+            when { branch 'main' }
             steps {
-
                 withCredentials([
-                    file(
-                        credentialsId: 'kubeconfig',
-                        variable: 'KUBECONFIG'
-                    ),
-
                     [$class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']
+                     credentialsId: 'aws-credentials',
+                     accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'],
+                    usernamePassword(credentialsId: 'docker-registry',
+                                     usernameVariable: 'DOCKER_USER',
+                                     passwordVariable: 'DOCKER_PASS'),
+                    file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')
                 ]) {
-
                     sh '''
                         set -e
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
 
-                        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                        ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+                        ECR_REGISTRY="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                        aws ecr get-login-password --region "$AWS_REGION" | \
+                          docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-                        ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                        for svc in user-service product-service order-service; do
+                          docker build -t "$ECR_REGISTRY/med-erp/$svc:$IMAGE_TAG" \
+                            -t "$ECR_REGISTRY/med-erp/$svc:latest" "$svc/"
+                          docker push "$ECR_REGISTRY/med-erp/$svc:$IMAGE_TAG"
+                          docker push "$ECR_REGISTRY/med-erp/$svc:latest"
+                        done
 
-                        kubectl get nodes
-
-                        for svc in user-service product-service order-service
-                        do
-
-                            kubectl set image deployment/$svc \
-                              $svc=$ECR_REGISTRY/med-erp/$svc:$IMAGE_TAG \
-                              -n $K8S_NAMESPACE
-
-                            kubectl rollout status \
-                              deployment/$svc \
-                              -n $K8S_NAMESPACE \
-                              --timeout=5m
-
+                        for svc in user-service product-service order-service; do
+                          kubectl set image "deployment/$svc" "$svc=$ECR_REGISTRY/med-erp/$svc:$IMAGE_TAG" -n "$K8S_NAMESPACE"
+                          kubectl rollout status "deployment/$svc" -n "$K8S_NAMESPACE" --timeout=5m
                         done
                     '''
                 }
@@ -182,17 +81,6 @@ pipeline {
     }
 
     post {
-
-        success {
-            echo 'Pipeline completed successfully'
-        }
-
-        failure {
-            echo 'Pipeline failed'
-        }
-
-        always {
-            cleanWs()
-        }
+        always { cleanWs() }
     }
 }
