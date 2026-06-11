@@ -4,7 +4,7 @@
 
 # ── S3 Bucket ─────────────────────────────────────────────────────────────────
 resource "aws_s3_bucket" "frontend" {
-  bucket = "${var.project}-frontend-${var.environment}"
+  bucket = "${var.project}-frontend1-${var.environment}"
   tags   = merge(var.tags, { Name = "${var.project}-frontend" })
 }
 
