@@ -3,16 +3,16 @@ agent any
 
 
 environment {
-    AWS_REGION    = 'us-east-1'
+    AWS_REGION     = 'us-east-1'
     AWS_ACCOUNT_ID = '928898628041'
-    ECR_REGISTRY  = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-    K8S_NAMESPACE = 'med-erp'
+    K8S_NAMESPACE  = 'med-erp'
 
-    IMAGE_TAG = "${env.GIT_COMMIT ? env.GIT_COMMIT.take(8) : "b${env.BUILD_NUMBER}"}"
+    IMAGE_TAG      = "${env.BUILD_NUMBER}"
 
-    JAVA_HOME = "/usr/lib/jvm/java-17-openjdk-amd64"
-    PATH = "${JAVA_HOME}/bin:${env.PATH}"
+    JAVA_HOME      = "/usr/lib/jvm/java-17-openjdk-amd64"
+    PATH           = "${JAVA_HOME}/bin:${env.PATH}"
 }
 
 options {
@@ -32,13 +32,18 @@ stages {
     stage('Verify Environment') {
         steps {
             sh '''
+                echo "===== JAVA ====="
                 java -version
                 javac -version
                 mvn -version
 
+                echo "===== DOCKER ====="
                 docker --version
+
+                echo "===== AWS ====="
                 aws --version
 
+                echo "===== KUBECTL ====="
                 kubectl version --client
             '''
         }
@@ -60,6 +65,13 @@ stages {
                     cd ..
                 done
             '''
+        }
+
+        post {
+            always {
+                junit allowEmptyResults: true,
+                      testResults: '**/target/surefire-reports/*.xml'
+            }
         }
     }
 
@@ -86,7 +98,6 @@ stages {
 
                     for svc in user-service product-service order-service
                     do
-
                         IMAGE=${ECR_REGISTRY}/med-erp/${svc}
 
                         echo "Building ${IMAGE}:${IMAGE_TAG}"
@@ -98,7 +109,6 @@ stages {
 
                         docker push ${IMAGE}:${IMAGE_TAG}
                         docker push ${IMAGE}:latest
-
                     done
                 '''
             }
@@ -114,27 +124,66 @@ stages {
                  accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                  secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'],
 
-                file(credentialsId: 'kubeconfig',
-                     variable: 'KUBECONFIG')
+                file(
+                    credentialsId: 'kubeconfig',
+                    variable: 'KUBECONFIG'
+                )
             ]) {
 
                 sh '''
                     set -e
 
+                    export KUBECONFIG=$KUBECONFIG
+
+                    echo "===== EKS Cluster ====="
                     kubectl get nodes
 
-                    for svc in user-service product-service order-service
-                    do
+                    echo "===== Create Namespace ====="
+                    kubectl create namespace ${K8S_NAMESPACE} \
+                      --dry-run=client -o yaml | kubectl apply -f -
 
-                        kubectl set image deployment/${svc} \
-                        ${svc}=${ECR_REGISTRY}/med-erp/${svc}:${IMAGE_TAG} \
-                        -n ${K8S_NAMESPACE}
+                    echo "===== Apply ConfigMaps ====="
+                    kubectl apply -f k8s/configmaps/ -n ${K8S_NAMESPACE}
 
-                        kubectl rollout status deployment/${svc} \
-                        -n ${K8S_NAMESPACE} \
-                        --timeout=300s
+                    echo "===== Apply Services ====="
+                    kubectl apply -f k8s/services/ -n ${K8S_NAMESPACE}
 
-                    done
+                    echo "===== Apply Deployments ====="
+                    kubectl apply -f k8s/deployments/ -n ${K8S_NAMESPACE}
+
+                    echo "===== Apply HPA ====="
+                    kubectl apply -f k8s/hpa/ -n ${K8S_NAMESPACE}
+
+                    echo "===== Update Images ====="
+
+                    kubectl set image deployment/user-service \
+                      user-service=${ECR_REGISTRY}/med-erp/user-service:${IMAGE_TAG} \
+                      -n ${K8S_NAMESPACE}
+
+                    kubectl set image deployment/product-service \
+                      product-service=${ECR_REGISTRY}/med-erp/product-service:${IMAGE_TAG} \
+                      -n ${K8S_NAMESPACE}
+
+                    kubectl set image deployment/order-service \
+                      order-service=${ECR_REGISTRY}/med-erp/order-service:${IMAGE_TAG} \
+                      -n ${K8S_NAMESPACE}
+
+                    echo "===== Rollout Status ====="
+
+                    kubectl rollout status deployment/user-service \
+                      -n ${K8S_NAMESPACE} --timeout=300s
+
+                    kubectl rollout status deployment/product-service \
+                      -n ${K8S_NAMESPACE} --timeout=300s
+
+                    kubectl rollout status deployment/order-service \
+                      -n ${K8S_NAMESPACE} --timeout=300s
+
+                    echo "===== Pods ====="
+                    kubectl get pods -n ${K8S_NAMESPACE}
+
+                    echo "===== Services ====="
+                    kubectl get svc -n ${K8S_NAMESPACE}
                 '''
             }
         }
@@ -144,17 +193,17 @@ stages {
 post {
 
     success {
-        echo "Pipeline completed successfully"
+        echo 'Pipeline completed successfully'
     }
 
     failure {
-        echo "Pipeline failed"
+        echo 'Pipeline failed'
     }
 
     always {
         cleanWs()
     }
 }
-
+```
 
 }
