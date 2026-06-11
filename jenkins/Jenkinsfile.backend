@@ -47,7 +47,6 @@ pipeline {
         }
 
         stage('Docker push & deploy') {
-            when { branch 'main' }
             steps {
                 withCredentials([
                     [$class: 'AmazonWebServicesCredentialsBinding',
