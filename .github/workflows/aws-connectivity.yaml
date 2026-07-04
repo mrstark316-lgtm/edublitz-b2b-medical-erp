@@ -1,4 +1,4 @@
-ame: AWS example workflow
+name: AWS example workflow
 on:
   push
 env:
