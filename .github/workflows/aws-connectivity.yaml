@@ -14,9 +14,9 @@ jobs:
     steps:
       - name: Git clone the repository
         uses: actions/checkout@v6
-
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+        
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_CICD }}
+          role-to-assume: ${{ secrets.AWS_CICD }}
           aws-region: ${{ env.AWS_REGION }}
