@@ -2,7 +2,7 @@ name: AWS example workflow
 on:
   push
 env:
-  AWS_REGION : "AWS-REGION"
+  AWS_REGION : "us-east-1"
 
 permissions:
   id-token: write 
