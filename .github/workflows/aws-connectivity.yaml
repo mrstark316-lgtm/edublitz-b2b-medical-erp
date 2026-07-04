@@ -20,3 +20,6 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_CICD }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Listing the S3 Buckets
+        run: |
+          aws s3 ls 
