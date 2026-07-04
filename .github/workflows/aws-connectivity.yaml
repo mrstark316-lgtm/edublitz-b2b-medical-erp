@@ -8,16 +8,14 @@ permissions:
   id-token: write 
   contents: read    
 
-  S3PackageUpload:
+S3PackageUpload:
+  runs-on: ubuntu-latest
+  steps:
+    - name: Git clone the repository
+      uses: actions/checkout@v6
 
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Git clone the repository
-        uses: actions/checkout@v6
-
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
-        with:
-          role-to-assume: ${{ env.AWS_CICD }}
-          aws-region: ${{ env.AWS_REGION }}
+    - name: configure aws credentials
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+      with:
+        role-to-assume: ${{ env.AWS_CICD }}
+        aws-region: ${{ env.AWS_REGION }}
