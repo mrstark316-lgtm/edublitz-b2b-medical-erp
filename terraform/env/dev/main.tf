@@ -18,7 +18,7 @@ terraform {
 
   # Remote state — use S3 backend
   backend "s3" {
-    bucket         = "med-erp-terraform-state-dev"
+    bucket         = "project-ultron-007"
     key            = "dev/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
@@ -60,11 +60,11 @@ module "vpc" {
 module "eks" {
   source                = "../../modules/eks"
   cluster_name          = local.cluster_name
-  kubernetes_version    = "1.30"
+  kubernetes_version    = "1.35"
   vpc_id                = module.vpc.vpc_id
   vpc_cidr              = module.vpc.vpc_cidr
   private_subnet_ids    = module.vpc.private_subnet_ids
-  node_instance_types   = ["t3.medium"]
+  node_instance_types   = ["c7i-flex.large"]
   capacity_type         = "SPOT"       # Use Spot for dev cost savings
   node_desired_count    = 2
   node_min_count        = 1
@@ -86,7 +86,7 @@ module "frontend" {
   source              = "../../modules/s3-cloudfront"
   project             = local.project
   environment         = local.environment
-  domain_names        = ["dev.med-erp.${var.domain_name}"]
+  domain_names        = ["dev.${var.domain_name}"]
   acm_certificate_arn = var.acm_certificate_arn
   tags                = local.common_tags
 }
@@ -95,8 +95,8 @@ module "frontend" {
 module "dns" {
   source                 = "../../modules/route53"
   domain_name            = var.domain_name
-  frontend_subdomain     = "dev.med-erp"
-  api_subdomain          = "dev.api.med-erp"
+  frontend_subdomain     = "dev"
+  api_subdomain          = "api"
   cloudfront_domain_name = module.frontend.cloudfront_domain_name
   alb_dns_name           = var.alb_dns_name   # Set after ALB Ingress Controller deploys
   tags                   = local.common_tags
